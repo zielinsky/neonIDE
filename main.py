@@ -1,6 +1,6 @@
 import os
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, simpledialog
 from tkinter.scrolledtext import ScrolledText
 from tkinter import ttk
 
@@ -16,10 +16,20 @@ class SimpleTextEditor:
         self.root.bind('<Control-S>', self.save_file)
         self.root.bind('<Control-z>', self.undo)
         self.root.bind('<Control-Z>', self.undo)
+        self.root.bind('<Control-y>', self.redo)
+        self.root.bind('<Control-Y>', self.redo)
         self.root.bind('<Control-c>', self.copy)
         self.root.bind('<Control-C>', self.copy)
         self.root.bind('<Control-v>', self.paste)
         self.root.bind('<Control-V>', self.paste)
+        self.root.bind('<Control-x>', self.cut)
+        self.root.bind('<Control-X>', self.cut)
+        self.root.bind('<Control-k>', self.delete_line)
+        self.root.bind('<Control-K>', self.delete_line)
+        self.root.bind('<Control-f>', self.find_text)
+        self.root.bind('<Control-F>', self.find_text)
+        self.root.bind('<Control-r>', self.replace_text)
+        self.root.bind('<Control-R>', self.replace_text)
 
         # Menu górne
         self.menu = tk.Menu(self.root)
@@ -57,6 +67,10 @@ class SimpleTextEditor:
         # Załaduj drzewo plików
         self.populate_tree()
 
+        # Ustawienia edytora
+        self.text_editor.edit_modified(False)
+        self.text_editor.bind('<<Modified>>', self.on_modified)
+
     def populate_tree(self):
         self.tree.delete(*self.tree.get_children())
         path = os.getcwd()
@@ -86,24 +100,19 @@ class SimpleTextEditor:
         selected = self.tree.focus()
         abspath = self.tree.item(selected, 'values')[0]
         if os.path.isfile(abspath):
-            try:
-                with open(abspath, 'r', encoding='utf-8') as file:
-                    content = file.read()
-                self.text_editor.delete('1.0', tk.END)
-                self.text_editor.insert(tk.END, content)
-                self.root.title(f"Prosty Edytor Tekstu - {abspath}")
-                self.current_file = abspath
-            except Exception as e:
-                messagebox.showerror("Błąd", f"Nie można otworzyć pliku: {e}")
+            self.open_file(filepath=abspath)
 
-    def open_file(self, event=None):
-        filepath = filedialog.askopenfilename()
+    def open_file(self, event=None, filepath=None):
+        if not filepath:
+            filepath = filedialog.askopenfilename()
         if filepath:
             try:
                 with open(filepath, 'r', encoding='utf-8') as file:
                     content = file.read()
                 self.text_editor.delete('1.0', tk.END)
                 self.text_editor.insert(tk.END, content)
+                self.text_editor.edit_reset()  # Resetuje stos cofania
+                self.text_editor.edit_modified(False)  # Resetuje flagę modyfikacji
                 self.root.title(f"Prosty Edytor Tekstu - {filepath}")
                 self.current_file = filepath
             except Exception as e:
@@ -115,6 +124,7 @@ class SimpleTextEditor:
                 content = self.text_editor.get('1.0', tk.END)
                 with open(self.current_file, 'w', encoding='utf-8') as file:
                     file.write(content)
+                self.text_editor.edit_modified(False)  # Resetuje flagę modyfikacji
                 messagebox.showinfo("Informacja", "Plik został zapisany.")
             except Exception as e:
                 messagebox.showerror("Błąd", f"Nie można zapisać pliku: {e}")
@@ -130,15 +140,25 @@ class SimpleTextEditor:
                     file.write(content)
                 self.root.title(f"Prosty Edytor Tekstu - {filepath}")
                 self.current_file = filepath
+                self.text_editor.edit_modified(False)  # Resetuje flagę modyfikacji
                 messagebox.showinfo("Informacja", "Plik został zapisany.")
             except Exception as e:
                 messagebox.showerror("Błąd", f"Nie można zapisać pliku: {e}")
+
+    def on_modified(self, event=None):
+        self.text_editor.edit_modified(False)  # Resetuje flagę modyfikacji
 
     def undo(self, event=None):
         try:
             self.text_editor.edit_undo()
         except tk.TclError:
             pass  # Brak akcji do cofnięcia
+
+    def redo(self, event=None):
+        try:
+            self.text_editor.edit_redo()
+        except tk.TclError:
+            pass  # Brak akcji do ponowienia
 
     def copy(self, event=None):
         try:
@@ -156,10 +176,50 @@ class SimpleTextEditor:
         except tk.TclError:
             pass  # Schowek jest pusty
 
+    def cut(self, event=None):
+        try:
+            self.copy()
+            self.text_editor.delete("sel.first", "sel.last")
+        except tk.TclError:
+            pass  # Brak zaznaczonego tekstu
+
+    def delete_line(self, event=None):
+        cursor_line = self.text_editor.index("insert").split(".")[0]
+        self.text_editor.delete(f"{cursor_line}.0", f"{cursor_line}.0 lineend")
+        # Dodaj separator do stosu cofania
+        self.text_editor.edit_separator()
+
+    def find_text(self, event=None):
+        search_query = simpledialog.askstring("Wyszukaj", "Wprowadź tekst do wyszukania:")
+        if search_query:
+            start_pos = '1.0'
+            self.text_editor.tag_remove('highlight', '1.0', tk.END)
+            while True:
+                start_pos = self.text_editor.search(search_query, start_pos, stopindex=tk.END)
+                if not start_pos:
+                    break
+                end_pos = f"{start_pos}+{len(search_query)}c"
+                self.text_editor.tag_add('highlight', start_pos, end_pos)
+                start_pos = end_pos
+            self.text_editor.tag_config('highlight', background='yellow')
+
+    def replace_text(self, event=None):
+        find_query = simpledialog.askstring("Zamień", "Znajdź:")
+        replace_query = simpledialog.askstring("Zamień", "Zamień na:")
+        if find_query and replace_query is not None:
+            idx = '1.0'
+            while True:
+                idx = self.text_editor.search(find_query, idx, tk.END)
+                if not idx:
+                    break
+                end_idx = f"{idx}+{len(find_query)}c"
+                self.text_editor.delete(idx, end_idx)
+                self.text_editor.insert(idx, replace_query)
+                idx = end_idx
+            messagebox.showinfo("Informacja", f"Zastąpiono wszystkie wystąpienia '{find_query}' na '{replace_query}'.")
+
 if __name__ == "__main__":
     root = tk.Tk()
     app = SimpleTextEditor(root)
     root.mainloop()
-
-
 
