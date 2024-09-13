@@ -1,4 +1,5 @@
 import os
+import re
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
 from tkinter.scrolledtext import ScrolledText
@@ -10,6 +11,10 @@ class SimpleTextEditor:
         self.root.title("Prosty Edytor Tekstu")
         self.root.geometry("800x600")
         self.current_file = None
+
+        # Domyślny rozmiar czcionki
+        self.font_size = 12
+        self.font_family = 'TkDefaultFont'
 
         # Skróty klawiszowe
         self.root.bind('<Control-s>', self.save_file)
@@ -30,6 +35,10 @@ class SimpleTextEditor:
         self.root.bind('<Control-F>', self.find_text)
         self.root.bind('<Control-r>', self.replace_text)
         self.root.bind('<Control-R>', self.replace_text)
+        self.root.bind('<Control-plus>', self.increase_font_size)
+        self.root.bind('<Control-minus>', self.decrease_font_size)
+        self.root.bind('<Control-=>', self.increase_font_size)  # Dla klawiatur bez klawisza plus
+        self.root.bind('<Control-underscore>', self.decrease_font_size)  # Dla klawiatur bez klawisza minus
 
         # Menu górne
         self.menu = tk.Menu(self.root)
@@ -60,9 +69,41 @@ class SimpleTextEditor:
 
         # Panel edytora tekstu
         self.editor_frame = tk.Frame(self.paned_window)
-        self.text_editor = ScrolledText(self.editor_frame, undo=True, autoseparators=True, maxundo=-1)
+        self.text_editor = ScrolledText(
+            self.editor_frame,
+            undo=True,
+            autoseparators=True,
+            maxundo=-1,
+            font=(self.font_family, self.font_size)
+        )
         self.text_editor.pack(fill=tk.BOTH, expand=1)
         self.paned_window.add(self.editor_frame)
+
+        # Dodajemy obsługę kolorowania składni
+        self.text_editor.bind('<KeyRelease>', self.on_key_release)
+
+        # Definicje wzorców składni i kolorów
+        self.syntax_patterns = {
+            'keyword': r'\b(import|from|class|def|return|if|else|elif|while|for|in|try|except|with|as|pass|break|continue|lambda|yield|global|nonlocal|assert|async|await|True|False|None)\b',
+            'string': r'(\".*?\"|\'.*?\')',
+            'comment': r'\#.*',
+            'number': r'\b\d+\.?\d*\b',
+            'operator': r'[-+/*%=<>!&|^~]',
+            'bracket': r'[\[\]\{\}\(\)]',
+        }
+
+        self.syntax_colors = {
+            'keyword': '#ff7f50',   # Coral
+            'string': '#daa520',    # Goldenrod
+            'comment': '#7cfc00',   # LawnGreen
+            'number': '#87ceeb',    # SkyBlue
+            'operator': '#f08080',  # LightCoral
+            'bracket': '#ffa500',   # Orange
+        }
+
+        # Tworzenie tagów dla kolorowania składni
+        for tag, color in self.syntax_colors.items():
+            self.text_editor.tag_configure(tag, foreground=color)
 
         # Załaduj drzewo plików
         self.populate_tree()
@@ -115,6 +156,7 @@ class SimpleTextEditor:
                 self.text_editor.edit_modified(False)  # Resetuje flagę modyfikacji
                 self.root.title(f"Prosty Edytor Tekstu - {filepath}")
                 self.current_file = filepath
+                self.highlight_syntax()
             except Exception as e:
                 messagebox.showerror("Błąd", f"Nie można otworzyć pliku: {e}")
 
@@ -173,6 +215,7 @@ class SimpleTextEditor:
             cursor_position = self.text_editor.index(tk.INSERT)
             clipboard_content = self.root.clipboard_get()
             self.text_editor.insert(cursor_position, clipboard_content)
+            self.highlight_syntax()
         except tk.TclError:
             pass  # Schowek jest pusty
 
@@ -186,8 +229,7 @@ class SimpleTextEditor:
     def delete_line(self, event=None):
         cursor_line = self.text_editor.index("insert").split(".")[0]
         self.text_editor.delete(f"{cursor_line}.0", f"{cursor_line}.0 lineend")
-        # Dodaj separator do stosu cofania
-        self.text_editor.edit_separator()
+        self.text_editor.edit_separator()  # Dodaj separator do stosu cofania
 
     def find_text(self, event=None):
         search_query = simpledialog.askstring("Wyszukaj", "Wprowadź tekst do wyszukania:")
@@ -218,8 +260,30 @@ class SimpleTextEditor:
                 idx = end_idx
             messagebox.showinfo("Informacja", f"Zastąpiono wszystkie wystąpienia '{find_query}' na '{replace_query}'.")
 
+    def on_key_release(self, event=None):
+        self.highlight_syntax()
+
+    def highlight_syntax(self, event=None):
+        content = self.text_editor.get('1.0', tk.END)
+        for tag in self.syntax_colors.keys():
+            self.text_editor.tag_remove(tag, '1.0', tk.END)
+
+        for tag, pattern in self.syntax_patterns.items():
+            for match in re.finditer(pattern, content):
+                start_index = f"1.0 + {match.start()} chars"
+                end_index = f"1.0 + {match.end()} chars"
+                self.text_editor.tag_add(tag, start_index, end_index)
+
+    def increase_font_size(self, event=None):
+        self.font_size += 1
+        self.text_editor.configure(font=(self.font_family, self.font_size))
+
+    def decrease_font_size(self, event=None):
+        if self.font_size > 1:
+            self.font_size -= 1
+            self.text_editor.configure(font=(self.font_family, self.font_size))
+
 if __name__ == "__main__":
     root = tk.Tk()
     app = SimpleTextEditor(root)
     root.mainloop()
-
